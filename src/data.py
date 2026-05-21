@@ -18,7 +18,17 @@ import pandas as pd
 
 HF_DATASET_NAME = "ucberkeley-dlab/measuring-hate-speech"
 HF_CONFIG = "default"
-DEFAULT_CACHE_PATH = Path(__file__).parent.parent / "data" / "raw" / "measuring_hate_speech.parquet"
+
+
+def _project_root() -> Path:
+    """Return the project root by walking up from cwd until pyproject.toml is found."""
+    for candidate in [Path.cwd(), *Path.cwd().parents]:
+        if (candidate / "pyproject.toml").exists():
+            return candidate
+    return Path.cwd()
+
+
+DEFAULT_CACHE_PATH = _project_root() / "data" / "raw" / "measuring_hate_speech.parquet"
 
 
 # The 10 ordinal annotation labels defined in Kennedy et al. (2020).
@@ -58,8 +68,8 @@ def load_raw_dataset(
         use_cache: When True, read from ``cache_path`` if the file exists and
             write to it after a fresh download. When False, always download.
         cache_path: Override the default cache location. Defaults to
-            ``data/raw/measuring_hate_speech.parquet`` relative to the working
-            directory.
+            ``<project_root>/data/raw/measuring_hate_speech.parquet``, where the
+            project root is located by searching upward for ``pyproject.toml``.
 
     Returns:
         A pandas DataFrame containing all rows from the ``train`` split.
@@ -190,9 +200,7 @@ def summarize_dataset(df: pd.DataFrame) -> dict:
     }
 
     missing_pct = (df.isnull().mean() * 100).round(4)
-    missing_values = {
-        col: float(pct) for col, pct in missing_pct.items() if pct > 0
-    }
+    missing_values = {col: float(pct) for col, pct in missing_pct.items() if pct > 0}
 
     return {
         "n_rows": int(len(df)),
