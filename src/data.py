@@ -18,7 +18,8 @@ import pandas as pd
 
 HF_DATASET_NAME = "ucberkeley-dlab/measuring-hate-speech"
 HF_CONFIG = "default"
-DEFAULT_CACHE_PATH = Path("data/raw/measuring_hate_speech.parquet")
+DEFAULT_CACHE_PATH = Path(__file__).parent.parent / "data" / "raw" / "measuring_hate_speech.parquet"
+
 
 # The 10 ordinal annotation labels defined in Kennedy et al. (2020).
 # These do not share a common column prefix, so they are enumerated explicitly.
