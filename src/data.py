@@ -19,18 +19,6 @@ import pandas as pd
 HF_DATASET_NAME = "ucberkeley-dlab/measuring-hate-speech"
 HF_CONFIG = "default"
 
-
-def _project_root() -> Path:
-    """Return the project root by walking up from cwd until pyproject.toml is found."""
-    for candidate in [Path.cwd(), *Path.cwd().parents]:
-        if (candidate / "pyproject.toml").exists():
-            return candidate
-    return Path.cwd()
-
-
-DEFAULT_CACHE_PATH = _project_root() / "data" / "raw" / "measuring_hate_speech.parquet"
-
-
 # The 10 ordinal annotation labels defined in Kennedy et al. (2020).
 # These do not share a common column prefix, so they are enumerated explicitly.
 _ANNOTATION_LABEL_COLS: list[str] = [
@@ -52,49 +40,6 @@ _DIRECT_IDENTIFIER_COLS: list[str] = ["comment_id", "annotator_id"]
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-
-
-def load_raw_dataset(
-    use_cache: bool = True,
-    cache_path: Path | None = None,
-) -> pd.DataFrame:
-    """Load the Measuring Hate Speech dataset, with optional local parquet cache.
-
-    On the first call the dataset is downloaded from HuggingFace and persisted
-    as a parquet file. Subsequent calls read from that file instead of hitting
-    the network.
-
-    Args:
-        use_cache: When True, read from ``cache_path`` if the file exists and
-            write to it after a fresh download. When False, always download.
-        cache_path: Override the default cache location. Defaults to
-            ``<project_root>/data/raw/measuring_hate_speech.parquet``, where the
-            project root is located by searching upward for ``pyproject.toml``.
-
-    Returns:
-        A pandas DataFrame containing all rows from the ``train`` split.
-
-    Example:
-        >>> df = load_raw_dataset()
-        >>> df.shape
-        (135556, 59)
-    """
-    resolved_path: Path = cache_path if cache_path is not None else DEFAULT_CACHE_PATH
-
-    if use_cache and resolved_path.exists():
-        return pd.read_parquet(resolved_path)
-
-    # Lazy import: datasets is a heavy dependency; keep module import fast.
-    from datasets import load_dataset  # type: ignore[import-untyped]
-
-    hf_dataset = load_dataset(HF_DATASET_NAME, HF_CONFIG, split="train")
-    df = hf_dataset.to_pandas()
-
-    if use_cache:
-        resolved_path.parent.mkdir(parents=True, exist_ok=True)
-        df.to_parquet(resolved_path, index=False)
-
-    return df
 
 
 def get_column_groups(df: pd.DataFrame) -> dict[str, list[str]]:
