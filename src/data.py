@@ -105,6 +105,7 @@ def get_column_groups(df: pd.DataFrame) -> dict[str, list[str]]:
             "annotator_income",
             "annotator_ideology",
             "annotator_age",
+            "annotator_race_combined",
         ]
         if c in cols
     ]
@@ -122,8 +123,7 @@ def get_column_groups(df: pd.DataFrame) -> dict[str, list[str]]:
         c for c in df.columns if c.startswith("annotator_") and c not in classified
     ]
 
-    # Catchall difensivo: cattura eventuali colonne aggiunte in futuro da HF
-    # che non rientrano in nessuna delle regole sopra. Idealmente vuoto.
+    
     classified |= set(annotator_qi_dummies)
     other = [c for c in df.columns if c not in classified]
 
@@ -138,6 +138,70 @@ def get_column_groups(df: pd.DataFrame) -> dict[str, list[str]]:
         "annotator_qi_dummies": annotator_qi_dummies,
         "other": other,
     }
+
+
+def add_race_combined(df: pd.DataFrame) -> pd.DataFrame:
+    """Aggrega le dummies ``annotator_race_*`` in una sola colonna categoriale.
+
+    Le otto dummies sulla razza dell'annotatore (asian, black, latinx,
+    middle_eastern, native_american, pacific_islander, white, other)
+    sono multi-label: ~7.7% degli annotatori dichiara appartenenza a
+    piu' di una categoria. Una colonna categorica single-label e'
+    necessaria per: (a) inserire la razza tra i quasi-identificatori
+    di summary del Cap. 3 senza esplodere lo spazio cartesiano; (b)
+    consentire visualizzazioni demografiche univoche al Cap. 2.
+
+    Schema di aggregazione (single-label):
+
+    - ``white_only``, ``black_only``, ``asian_only``, ``latinx_only``:
+      annotatore appartenente esclusivamente al gruppo indicato.
+    - ``other_only``: appartenenza esclusiva a uno tra middle_eastern,
+      native_american, pacific_islander, other (cardinalita' troppo
+      bassa per categorie autonome — ~313 annotatori in totale).
+    - ``multiracial``: appartenenza dichiarata a >= 2 categorie.
+    - ``unknown``: nessuna appartenenza dichiarata (~4 annotatori).
+
+    Args:
+        df: dataset Measuring Hate Speech. Deve contenere le otto
+            colonne ``annotator_race_*``.
+
+    Returns:
+        Copia di ``df`` con una colonna aggiuntiva
+        ``annotator_race_combined`` di tipo object.
+    """
+    out = df.copy()
+    race_cols = [c for c in out.columns if c.startswith("annotator_race_")]
+    if not race_cols:
+        return out
+
+    n_races = out[race_cols].sum(axis=1)
+    primary = {
+        "annotator_race_white":  "white_only",
+        "annotator_race_black":  "black_only",
+        "annotator_race_asian":  "asian_only",
+        "annotator_race_latinx": "latinx_only",
+    }
+    other_cols = [
+        c for c in race_cols
+        if c not in primary and c != "annotator_race_combined"
+    ]
+
+    def _label(row: pd.Series) -> str:
+        total = int(row[race_cols].sum())
+        if total == 0:
+            return "unknown"
+        if total >= 2:
+            return "multiracial"
+        for col, lab in primary.items():
+            if bool(row[col]):
+                return lab
+        for col in other_cols:
+            if bool(row[col]):
+                return "other_only"
+        return "unknown"
+
+    out["annotator_race_combined"] = out.apply(_label, axis=1).astype(object)
+    return out
 
 
 def summarize_dataset(df: pd.DataFrame) -> dict:
@@ -296,21 +360,53 @@ def annotator_productivity(df: pd.DataFrame) -> dict:
         "gini": gini_coefficient(counts.values),
         "top1pct_share": top1pct_share,
     }
+def _verify_qi_consistency(df: pd.DataFrame, qi_columns: list[str]) -> None:
+    """Solleva un warning se un annotator_id ha valori QI non costanti."""
+    for col in qi_columns:
+        n_distinct = df.groupby("annotator_id")[col].nunique(dropna=False)
+        n_bad = (n_distinct > 1).sum()
+        if n_bad > 0:
+            print(f"WARNING: {n_bad} annotatori con valori non costanti su {col}")
 
 
-def comment_score_dispersion(df: pd.DataFrame) -> pd.Series:
-    """Deviazione standard di ``hate_speech_score`` per commento.
+def build_annotators_df(df, qi_columns):
+    _verify_qi_consistency(df, qi_columns)
+    
+    agg = df.groupby("annotator_id").agg(
+        n_annotations=("comment_id", "count"),
+        hate_score_mean=("hate_speech_score", "mean"),
+        hate_score_std=("hate_speech_score", "std"),
+    )
+    qi = df.groupby("annotator_id")[qi_columns].first()
+    
+    # Aggiungiamo dummy multi-label necessarie al §3
+    multilabel_cols = [c for c in df.columns 
+                       if c.startswith("annotator_race_") 
+                       or c.startswith("annotator_sexuality_")
+                       or c.startswith("annotator_religion_")]
+    multilabel = df.groupby("annotator_id")[multilabel_cols].first()
+    
+    return agg.join(qi).join(multilabel).reset_index()
 
-    Misura il disaccordo tra annotatori sullo stesso commento. Std
-    bassa = consenso (commento "pacificamente" hateful o non-hateful);
-    std alta = commento controverso. Commenti con un solo annotatore
-    producono NaN (per definizione: la std di un elemento e' indefinita).
 
-    Args:
-        df: dataset Measuring Hate Speech.
+def build_comments_df(
+    df: pd.DataFrame,
+    target_dummies: list[str],
+    majority_threshold: float = 0.5,
+) -> pd.DataFrame:
+    """Aggrega per comment_id: score mediato + target via majority vote.
 
-    Returns:
-        Serie indicizzata per ``comment_id`` con la std dei punteggi.
-        Le entry NaN (commenti con un solo annotatore) sono rimosse.
+    Non contiene annotator_id né QI demografiche: l'aggregazione collassa
+    l'identità degli annotatori per costruzione.
     """
-    return df.groupby("comment_id")["hate_speech_score"].std().dropna()
+    agg = df.groupby("comment_id").agg(
+        hate_score_mean=("hate_speech_score", "mean"),
+        hate_score_std=("hate_speech_score", "std"),
+        n_annotators=("annotator_id", "count"),
+        text=("text", "first"),
+        platform=("platform", "first"),
+    )
+    targets = df.groupby("comment_id")[target_dummies].mean() > majority_threshold
+    return agg.join(targets).reset_index()
+
+
