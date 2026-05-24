@@ -1,6 +1,5 @@
-import hashlib
 import pandas as pd
-from typing import Callable
+from collections.abc import Callable
 
 
 def compute_k_anonymity(df: pd.DataFrame, qi_columns: list[str]) -> dict:
@@ -24,7 +23,7 @@ def compute_l_diversity(
     sensitive_column: str,
 ) -> dict:
     """Calcola l-diversity: # valori distinti dell'attributo sensibile per ogni gruppo QI."""
-    l_per_group = df.groupby(qi_columns, dropna=False)[sensitive_column].nunique(dropna=False)
+    l_per_group = df.groupby(qi_columns, dropna=False, observed=True)[sensitive_column].nunique(dropna=False)
     return {
         "l_effective": int(l_per_group.min()),
         "distribution": l_per_group,
