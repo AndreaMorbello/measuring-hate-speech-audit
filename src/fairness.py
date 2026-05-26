@@ -127,31 +127,6 @@ def primary_target(row: pd.Series, target_dims: list[str]) -> str:
     return "none"
 
 
-def compute_reweighing_weights(
-    df: pd.DataFrame,
-    group_col: str,
-    label_col: str,
-) -> pd.Series:
-    """Reweighing standard (Kamiran & Calders 2012):
-    peso = P(group) * P(label) / P(group, label)
-
-    Normalizza in modo che il peso medio sia 1.
-    """
-    p_group = df[group_col].value_counts(normalize=True)
-    p_label = df[label_col].value_counts(normalize=True)
-    joint = df.groupby([group_col, label_col]).size() / len(df)
-
-    weights = pd.Series(index=df.index, dtype=float)
-    for idx, row in df.iterrows():
-        g, l = row[group_col], row[label_col]
-        marginal = p_group[g] * p_label[l]
-        joint_p = joint.loc[(g, l)] if (g, l) in joint.index else marginal
-        weights[idx] = marginal / joint_p if joint_p > 0 else 1.0
-
-    weights = weights / weights.mean()
-    return weights
-
-
 # ---------------------------------------------------------------------------
 # §4.4.1 — Performance disaggregate per gruppo
 # ---------------------------------------------------------------------------

@@ -20,3 +20,6 @@ lime==0.2.0.1
 black==24.10.0
 ruff==0.7.4
 nbqa==1.9.1
+
+# Oversampling
+imbalanced-learn
